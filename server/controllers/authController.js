@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import UserModel from "../models/userModel.js";
-import transporter from "../config/nodemailer.js";
+
 
 import nodemailer from 'nodemailer';
 
@@ -34,31 +34,27 @@ export const register = async (req, res) => {
             sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
             maxAge: 7 * 24 * 60 * 60 * 1000,
         });
-        //send confirmation  mail
 
-        // const mailOptions = {
-        //     from: process.env.SENDER_EMAIL,
-        //     to: email,
-        //     subject: "Welcome to our website",
-        //     text: `Welcome to our Website. Your account has been created with email id: ${email}`
-        // }
-        // await transporter.sendMail(mailOptions);
+        //send welcome  mail
 
         const transporter = nodemailer.createTransport({
-            host: 'smtp.ethereal.email',
+            host: 'smtp.gmail.com',
             port: 587,
+            secure: false,
             auth: {
-                user: 'scotty.casper51@ethereal.email',
-                pass: 'TkK2mtTRDJv2t6FWpe'
-            }
+                user: process.env.SMTP_USER,
+                pass: process.env.SMTP_PASS,
+            },
         });
 
+
         const mailOptions = {
-            from: '<scotty.casper51@ethereal.email>' ,
-            to: "roys45545@gmail.com",
-            subject: "Welcome to our website",
-            text: `Welcome to our Website. Your account has been created with email id: ${email}`
-        }
+            from: process.env.SENDER_EMAIL,
+            to: email,
+            subject: 'Welcome to our website',
+            text: `Welcome , ${name} to our website!  Your account has been created with email id: ${email}`,
+        };
+
 
         await transporter.sendMail(mailOptions);
 
@@ -131,18 +127,30 @@ export const logout = async (req, res) => {
 //verfication otp 
 export const sendVerifyOtp = async (req, res) => {
 
-    try{
-        const {userId} = req.body;
+    try {
+        const { userId } = req.body;
         const user = await UserModel.findById(userId);
 
-        if(user.isAccountVerified){
+        if (user.isAccountVerified) {
             return res.json({ success: false, message: "User account is already verified" });
         }
 
-        const otp = string(Math.floor(100000 + Math.random() * 900000));
-        user.verifyOtp = otp;
-        user.verifyOtpExpiryAt = Date.now() + 24 * 60 * 60 * 1000;
-        await user.save();
+        const otp = String(Math.floor(100000 + Math.random() * 900000)); //create 6 dig otp
+        user.verifyOtp = otp; //save  this otp in database 
+        user.verifyOtpExpiryAt = Date.now() + 24 * 60 * 60 * 1000; //set otp expire time
+        await user.save(); //save user in database
+
+        //create transporter
+
+        const transporter = nodemailer.createTransport({
+            host: 'smtp.gmail.com',
+            port: 587,
+            secure: false,
+            auth: {
+                user: process.env.SMTP_USER,
+                pass: process.env.SMTP_PASS,
+            },
+        });
 
         const mailOptions = {
             from: process.env.SENDER_EMAIL,
@@ -163,8 +171,12 @@ export const sendVerifyOtp = async (req, res) => {
 
 
 
+
+
+
+//verify email using otp
 export const verifyEmail = async (req, res) => {
-    const {userId, otp} = req.body;
+    const { userId, otp } = req.body;
 
     if (!userId || !otp) {
         return res.json({ success: false, message: "Please fill all the fields" });
@@ -173,11 +185,11 @@ export const verifyEmail = async (req, res) => {
 
         const user = await UserModel.findById(userId);
 
-        if(!user){
+        if (!user) {
             return res.json({ success: false, message: "User does not exist" });
         }
 
-        if(user.verifyOtp === '' || user.verifyOtp !== otp){
+        if (user.verifyOtp === '' || user.verifyOtp !== otp) {
             return res.json({ success: false, message: "Invalid verification code" });
         }
 
@@ -191,8 +203,106 @@ export const verifyEmail = async (req, res) => {
         await user.save();
 
         return res.json({ success: true, message: "User account verified successfully" });
-        
+
     } catch (error) {
         res.json({ success: false, message: error.message });
+    }
+}
+
+//check if user is authenticated
+export const isAuthenticated = async (req, res) => {
+
+    try {
+        return res.json({ success: true, message: "User is authenticated" });
+    } catch (error) {
+        res.json({ success: false, message: error.message });
+    }
+}
+
+
+//send  password reset otp
+
+export const sendResetOtp = async (req, res) => {
+    const { email } = req.body;
+
+    if (!email){
+        return res.json({success:false, message: 'Email is required'})
+    }
+
+    try {
+
+        const user = await UserModel.findOne({email});
+        if(!user){
+            return res.json({success:false, message: 'User not found'});
+        }
+
+        const otp = String(Math.floor(100000 + Math.random() * 900000)); //create 6 dig otp
+        user.resetOtp = otp; //save  this otp in database 
+        user.resetOtpExpireAt = Date.now() + 15  * 60 * 1000; //set otp expire time
+        await user.save(); //save user in database
+
+        //create transporter
+
+        const transporter = nodemailer.createTransport({
+            host: 'smtp.gmail.com',
+            port: 587,
+            secure: false,
+            auth: {
+                user: process.env.SMTP_USER,
+                pass: process.env.SMTP_PASS,
+            },
+        });
+
+        const mailOptions = {
+            from: process.env.SENDER_EMAIL,
+            to: user.email,
+            subject: 'Password Reset OTP',
+            text: `Your OTP for resetting your password is: ${otp}.
+            Use this OTP to proceed with resetting your password.`
+        };
+        await transporter.sendMail(mailOptions);
+
+        return res.json({ success: true, message: "OTP send to your email" });
+        
+    } catch (error) {
+        return res.json({success:false, message: error.message});
+    }
+}
+
+//reset user password
+
+export const resetPassword = async (req, res) => {
+    const {email, otp, newPassword} = req.body;
+
+    if(!email || !otp || !newPassword){
+        return res.json({success:false, message: 'Please fill all the fields'});
+    }
+
+    try {
+
+        const user = await UserModel.findOne({email});
+        if(!user){
+            return res.json({success:false, message: 'User not found'});
+        }
+
+        if(user.resetOtp === '' || user.resetOtp !== otp){
+            return res.json({success:false, message: 'Invalid OTP'});
+        }
+
+        if(user.resetOtpExpireAt < Date.now()){
+            return res.json({success:false, message: 'OTP has expired'});
+        }
+
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        user.password = hashedPassword;
+        user.resetOtp = '';
+        user.resetOtpExpireAt = 0;
+        await user.save();
+
+        return res.json({success:true, message: 'Password has been reset successfully'});
+
+        
+    } catch (error) {
+        return res.json({success:false, message: error.message});
     }
 }
